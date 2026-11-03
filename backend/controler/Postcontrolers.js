@@ -1,112 +1,135 @@
+
 const Postmodel = require("../models/Postmodels");
 
 const createpost = async (req, res) => {
   try {
     const { description } = req.body;
-    
-    
-    if (!description && !req.file) {
-      return res.status(400).json({ message: "Post content or media is required" });
+
+    if (!description?.trim() && !req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "Post content or media is required",
+      });
     }
 
-    
-    let mediaType = null;
-    if (req.file) {
-      mediaType = req.file.mimetype.startsWith('video') ? 'video' : 'image';
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        success: false,
+        message: "User authentication required",
+      });
     }
+
+    const mediaType = req.file
+      ? req.file.mimetype.startsWith("video")
+        ? "video"
+        : "image"
+      : null;
 
     const newpost = await Postmodel.create({
       author: req.user.id,
-      description,
-      media: req.file ? req.file.path : null,  
-      mediaType: mediaType
+      description: description || "",
+      media: req.file ? req.file.path : null,
+      mediaType,
     });
 
-    return res.status(201).json(newpost);
+    const populatedPost = await Postmodel.findById(newpost._id)
+      .populate(
+        "author",
+        "firstname lastname username profileimg headline location"
+      );
+
+    return res.status(201).json({
+      success: true,
+      message: "Post created successfully",
+      post: populatedPost,
+    });
+
   } catch (error) {
     console.error("Post creation error:", error);
-    return res.status(500).json({ message: "Error creating post", error: error.message });
+
+    return res.status(500).json({
+      success: false,
+      message: "Error creating post",
+      error: error.message,
+    });
   }
 };
-
-
 
 const likePost = async (req, res) => {
   try {
-    const postId = req.params.postId;
+    const { postId } = req.params;
     const userId = req.user.id;
 
-   
     const post = await Postmodel.findById(postId);
+
     if (!post) {
       return res.status(404).json({ message: "Post not found" });
     }
 
-    const alreadyLiked = post.likes.includes(userId);
-    
-    let updatedPost;
-    if (alreadyLiked) {
-      updatedPost = await Postmodel.findByIdAndUpdate(
-        postId,
-        { $pull: { likes: userId } },
-        { new: true }
-      );
-    } else {
-      updatedPost = await Postmodel.findByIdAndUpdate(
-        postId,
-        { $addToSet: { likes: userId } },
-        { new: true }
-      );
-    }
+    const alreadyLiked = post.likes.some(
+      (id) => id.toString() === userId.toString()
+    );
 
-    
-    const populatedPost = await Postmodel.populate(updatedPost, {
-      path: 'author',
-      select: 'firstname lastname profileimg headline location'
-    });
+    const updatedPost = await Postmodel.findByIdAndUpdate(
+      postId,
+      alreadyLiked
+        ? { $pull: { likes: userId } }
+        : { $addToSet: { likes: userId } },
+      { new: true }
+    ).populate(
+      "author",
+      "firstname lastname profileimg headline location"
+    );
 
-    res.status(200).json(populatedPost);
+    return res.status(200).json(updatedPost);
+
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    console.error("Like post error:", error);
+    return res.status(500).json({
+      message: "Server error",
+      error: error.message,
+    });
   }
 };
-
 
 const addComment = async (req, res) => {
   try {
-    const postId = req.params.postId;
+    const { postId } = req.params;
     const { content } = req.body;
     const userId = req.user.id;
 
-    if (!content) {
-      return res.status(400).json({ message: "Comment content is required" });
+    if (!content?.trim()) {
+      return res.status(400).json({
+        message: "Comment content is required",
+      });
     }
 
     const post = await Postmodel.findById(postId);
+
     if (!post) {
       return res.status(404).json({ message: "Post not found" });
     }
 
-    const newComment = {
-      content,
-      user: userId
-    };
+    post.comments.push({
+      content: content.trim(),
+      user: userId,
+    });
 
-    post.comments.push(newComment);
     await post.save();
 
-   
     const populatedPost = await Postmodel.findById(postId)
       .populate("comments.user", "firstname lastname profileimg");
 
-    res.status(201).json(populatedPost.comments);
+    return res.status(201).json(populatedPost.comments);
+
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Add comment error:", error);
+    return res.status(500).json({
+      message: "Server error",
+      error: error.message,
+    });
   }
 };
-
 
 const deleteComment = async (req, res) => {
   try {
@@ -114,52 +137,62 @@ const deleteComment = async (req, res) => {
     const userId = req.user.id;
 
     const post = await Postmodel.findById(postId);
+
     if (!post) {
       return res.status(404).json({ message: "Post not found" });
     }
 
-    const commentIndex = post.comments.findIndex(
-      comment => comment._id.toString() === commentId
-    );
+    const comment = post.comments.id(commentId);
 
-    if (commentIndex === -1) {
+    if (!comment) {
       return res.status(404).json({ message: "Comment not found" });
     }
 
-  
-    const comment = post.comments[commentIndex];
-    if (comment.user.toString() !== userId.toString() && post.author.toString() !== userId.toString()) {
-      return res.status(403).json({ message: "Not authorized to delete this comment" });
+    if (
+      comment.user.toString() !== userId.toString() &&
+      post.author.toString() !== userId.toString()
+    ) {
+      return res.status(403).json({
+        message: "Not authorized to delete this comment",
+      });
     }
 
-    post.comments.splice(commentIndex, 1);
+    comment.deleteOne();
     await post.save();
 
-    res.status(200).json({ message: "Comment deleted successfully" });
+    return res.status(200).json({
+      message: "Comment deleted successfully",
+    });
+
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Delete comment error:", error);
+    return res.status(500).json({
+      message: "Server error",
+      error: error.message,
+    });
   }
 };
 
 const getUserPosts = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const userPosts = await Postmodel.find({ author: userId })
-      .populate("author", "firstname lastname username profileimg headline location")
+    const userPosts = await Postmodel.find({
+      author: req.user.id,
+    })
+      .populate(
+        "author",
+        "firstname lastname username profileimg headline location"
+      )
       .sort({ createdAt: -1 });
-    
-    return res.status(200).json(userPosts);
-  } catch (error) {
-    console.log(error);
-    return res.status(500).json({ message: "Error fetching user posts" });
-  }
-};
 
-module.exports = {
-  likePost,
-  addComment,
-  deleteComment
+    return res.status(200).json(userPosts);
+
+  } catch (error) {
+    console.error("Get user posts error:", error);
+    return res.status(500).json({
+      message: "Error fetching user posts",
+      error: error.message,
+    });
+  }
 };
 
 module.exports = {
@@ -167,5 +200,5 @@ module.exports = {
   likePost,
   addComment,
   deleteComment,
-  getUserPosts
+  getUserPosts,
 };
