@@ -1,9 +1,12 @@
-import React, { createContext } from 'react';
+
+import React, { createContext } from "react";
 
 export const AuthUserContext = createContext();
 
 export default function AuthProvider({ children }) {
-  const serveruri = import.meta.env.VITE_SERVER_URI ;
+  const serveruri = import.meta.env.DEV
+    ? "http://localhost:5000"
+    : (import.meta.env.VITE_SERVER_URI || "");
 
   const contextValue = {
     serveruri,
