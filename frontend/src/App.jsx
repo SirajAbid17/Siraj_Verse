@@ -17,9 +17,6 @@ import "./App.css";
 
 import { Userdatacontext } from "./Context/UserContext";
 
-// =====================================
-// LAZY LOADED COMPONENTS
-// =====================================
 
 const Home = lazy(() => import("./components/Home"));
 const Refresh = lazy(() => import("./components/Refresh"));
@@ -33,9 +30,6 @@ const Editprofile = lazy(() => import("./components/Editprofile"));
 const Signup = lazy(() => import("./components/Signup"));
 const Login = lazy(() => import("./components/Login"));
 
-// =====================================
-// LOADING COMPONENT
-// =====================================
 
 function PageLoader() {
   return (
@@ -45,10 +39,6 @@ function PageLoader() {
     </div>
   );
 }
-
-// =====================================
-// APP COMPONENT
-// =====================================
 
 function App() {
   const { userdata } = useContext(Userdatacontext);
@@ -70,7 +60,7 @@ function App() {
   return (
     <Suspense fallback={<PageLoader />}>
       <Routes>
-        {/* HOME */}
+       
         <Route
           path="/"
           element={
@@ -78,7 +68,7 @@ function App() {
           }
         />
 
-        {/* AUTHENTICATION */}
+        
         <Route
           path="/signup"
           element={
@@ -93,7 +83,7 @@ function App() {
           }
         />
 
-        {/* OTHER PAGES */}
+       
         <Route path="/Welcome" element={<Refresh />} />
 
         <Route path="/quicklinks" element={<QuickLinks />} />
@@ -110,7 +100,7 @@ function App() {
 
         <Route path="/network" element={<Mynetwork />} />
 
-        {/* INVALID ROUTES */}
+       
         <Route
           path="*"
           element={

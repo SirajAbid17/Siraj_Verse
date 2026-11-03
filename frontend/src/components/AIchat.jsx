@@ -5,104 +5,128 @@ import "react-toastify/dist/ReactToastify.css";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+const INITIAL_MESSAGE = {
+  sender: "bot",
+  text: "Hi there! I'm SirajVerse AI, your personal AI assistant. How can I help you today?",
+};
+
+const getApiUrl = () => {
+  const envUri = (import.meta.env.VITE_SERVER_URI || "").trim();
+
+  if (envUri) {
+    return envUri.replace(/\/+$/, "") + "/api/ai/chat";
+  }
+
+  if (import.meta.env.DEV) {
+    return "http://localhost:5000/api/ai/chat";
+  }
+
+  return "/api/ai/chat";
+};
+
+const API_URL = getApiUrl();
+
 export default function AIchat() {
   const [isOpen, setIsOpen] = useState(true);
   const [text, setText] = useState("");
-  const [messages, setMessages] = useState(() => {
-    const savedMessages = localStorage.getItem("aiChatMessages");
-    if (savedMessages) {
-      try {
-        return JSON.parse(savedMessages);
-      } catch {
-        return [
-          { sender: "bot", text: "Hi there! I'm SirajVerse AI, your personal AI assistant." },
-        ];
-      }
-    }
-    return [
-      { sender: "bot", text: "Hi there! I'm SirajVerse AI, your personal AI assistant." },
-    ];
-  });
   const [loading, setLoading] = useState(false);
+
   const messagesEndRef = useRef(null);
 
-  const api_url = `${import.meta.env.VITE_API_URL}?key=${import.meta.env.VITE_API_KEY}`;
+  const [messages, setMessages] = useState(() => {
+    try {
+      const saved = localStorage.getItem("aiChatMessages");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length) return parsed;
+      }
+    } catch (err) {
+      console.error("CHAT HISTORY ERROR:", err);
+    }
+    return [INITIAL_MESSAGE];
+  });
 
   useEffect(() => {
-    localStorage.setItem("aiChatMessages", JSON.stringify(messages));
+    try {
+      localStorage.setItem("aiChatMessages", JSON.stringify(messages));
+    } catch (err) {
+      console.error("SAVE CHAT HISTORY ERROR:", err);
+    }
   }, [messages]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  if (!isOpen) return null;
+  }, [messages, loading]);
 
   const handleSend = async () => {
-    if (!text.trim()) {
-      toast.warning("Please enter a message", {
-        position: "top-right",
-        autoClose: 3000,
-      });
+    const userText = text.trim();
+    if (!userText) {
+      toast.warning("Please enter a message.");
       return;
     }
+    if (loading) return;
 
-    const userMessage = { sender: "user", text };
-    setMessages((prev) => [...prev, userMessage]);
+    setMessages((prev) => [...prev, { sender: "user", text: userText }]);
     setText("");
     setLoading(true);
 
     try {
-      const parts = [{ text }];
+      console.log(" AI REQUEST →", API_URL, userText);
 
-      const response = await fetch(api_url, {
+      const response = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts }],
-          generationConfig: {
-            temperature: 0.7,
-            topP: 0.8,
-            topK: 40,
-          },
-        }),
+        credentials: "include",
+        body: JSON.stringify({ message: userText }),
       });
+
+      console.log(" Response status:", response.status);
 
       const rawText = await response.text();
-      let data;
+      console.log(" Raw response:", rawText);
+
+      let data = {};
       try {
-        data = JSON.parse(rawText);
-      } catch {
-        console.log("Invalid JSON response:", rawText);
-        toast.error("Invalid response from server", {
-          position: "top-right",
-          autoClose: 4000,
-        });
-        setMessages((prev) => [
-          ...prev,
-          { sender: "bot", text: "Error: Invalid API response." },
-        ]);
-        return;
+        data = rawText ? JSON.parse(rawText) : {};
+      } catch (parseErr) {
+        console.error("JSON parse failed:", parseErr);
+        data = {
+          success: false,
+          message: `Server returned non-JSON: ${rawText.slice(0, 200)}`,
+        };
       }
 
-      const aiReply =
-        data?.candidates?.[0]?.content?.parts?.[0]?.text || "No response from AI";
-      setMessages((prev) => [...prev, { sender: "bot", text: aiReply }]);
+      console.log(" Parsed data:", data);
 
-      toast.success("Message sent successfully!", {
-        position: "top-right",
-        autoClose: 2000,
-      });
+      if (!response.ok) {
+        throw new Error(
+          data?.message ||
+            `Backend error ${response.status}. Check backend terminal.`
+        );
+      }
+
+      if (!data?.success || !data?.reply) {
+        throw new Error(
+          data?.message || "AI returned empty response. Check backend terminal."
+        );
+      }
+
+      setMessages((prev) => [...prev, { sender: "bot", text: data.reply }]);
     } catch (error) {
-      console.error("Fetch Error:", error);
-      toast.error("Failed to send message. Please try again.", {
-        position: "top-right",
-        autoClose: 4000,
-      });
+      console.error(" AI CHAT ERROR:", error);
+
+      let errorMessage = error.message || "Unknown error";
+
+      if (error instanceof TypeError) {
+        errorMessage = `Cannot reach backend at ${API_URL}. Check server is running.`;
+      }
+
       setMessages((prev) => [
         ...prev,
-        { sender: "bot", text: "Sorry, I couldn't get a response right now." },
+        { sender: "bot", text: `###  Error\n\n${errorMessage}` },
       ]);
+
+      toast.error(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -116,20 +140,21 @@ export default function AIchat() {
   };
 
   const handleClearMessages = () => {
-    setMessages([
-      { sender: "bot", text: "Hi there! I'm SirajVerse AI, your personal AI assistant." },
-    ]);
-    localStorage.removeItem("aiChatMessages");
-    toast.success("All messages cleared!", {
-      position: "top-right",
-      autoClose: 3000,
-    });
+    setMessages([INITIAL_MESSAGE]);
+    try {
+      localStorage.removeItem("aiChatMessages");
+    } catch (err) {
+      console.error("CLEAR CHAT ERROR:", err);
+    }
+    toast.success("All messages cleared!");
   };
 
   const handleClearConfirmation = () => {
     toast.info(
       <div className="flex flex-col gap-3">
-        <p className="text-sm font-medium">Are you sure you want to clear all messages?</p>
+        <p className="text-sm font-medium">
+          Are you sure you want to clear all messages?
+        </p>
         <div className="flex gap-2 justify-end">
           <button
             onClick={() => {
@@ -158,51 +183,56 @@ export default function AIchat() {
     );
   };
 
- 
   const markdownComponents = {
-    h1: ({ node, ...props }) => (
+    h1: (props) => (
       <h1 className="text-lg font-bold mt-3 mb-2 text-white" {...props} />
     ),
-    h2: ({ node, ...props }) => (
+    h2: (props) => (
       <h2 className="text-base font-bold mt-3 mb-2 text-white" {...props} />
     ),
-    h3: ({ node, ...props }) => (
+    h3: (props) => (
       <h3 className="text-sm font-bold mt-2 mb-1 text-white" {...props} />
     ),
-    h4: ({ node, ...props }) => (
+    h4: (props) => (
       <h4 className="text-sm font-semibold mt-2 mb-1 text-gray-100" {...props} />
     ),
-    p: ({ node, ...props }) => (
+    p: (props) => (
       <p className="mb-2 leading-relaxed text-sm text-gray-100" {...props} />
     ),
-    ul: ({ node, ...props }) => (
-      <ul className="list-disc ml-5 mb-2 space-y-1 text-sm text-gray-100" {...props} />
+    ul: (props) => (
+      <ul
+        className="list-disc ml-5 mb-2 space-y-1 text-sm text-gray-100"
+        {...props}
+      />
     ),
-    ol: ({ node, ...props }) => (
-      <ol className="list-decimal ml-5 mb-2 space-y-1 text-sm text-gray-100" {...props} />
+    ol: (props) => (
+      <ol
+        className="list-decimal ml-5 mb-2 space-y-1 text-sm text-gray-100"
+        {...props}
+      />
     ),
-    li: ({ node, ...props }) => <li className="text-sm leading-relaxed" {...props} />,
-    strong: ({ node, ...props }) => (
+    li: (props) => <li className="text-sm leading-relaxed" {...props} />,
+    strong: (props) => (
       <strong className="font-semibold text-white" {...props} />
     ),
-    em: ({ node, ...props }) => <em className="italic text-gray-100" {...props} />,
-    code: ({ node, inline, className, children, ...props }) => {
-      return inline ? (
-        <code
-          className="bg-gray-700 text-yellow-200 px-1 py-0.5 rounded text-xs font-mono"
-          {...props}
-        >
-          {children}
-        </code>
-      ) : (
-        <pre className="bg-gray-950 border border-gray-700 p-3 rounded-lg overflow-x-auto my-2 text-xs">
-          <code className="text-gray-100 font-mono" {...props}>
-            {children}
-          </code>
-        </pre>
-      );
-    },
-    a: ({ node, ...props }) => (
+    em: (props) => <em className="italic text-gray-100" {...props} />,
+    code: ({ className, children, ...props }) => (
+      <code
+        className={`bg-gray-700 text-yellow-200 px-1 py-0.5 rounded text-xs font-mono ${
+          className || ""
+        }`}
+        {...props}
+      >
+        {children}
+      </code>
+    ),
+    pre: (props) => (
+      <pre
+        className="bg-gray-950 border border-gray-700 p-3 rounded-lg overflow-x-auto my-2 text-xs text-gray-100"
+        {...props}
+      />
+    ),
+    a: (props) => (
       <a
         className="text-blue-400 underline hover:text-blue-300 break-all"
         target="_blank"
@@ -210,30 +240,31 @@ export default function AIchat() {
         {...props}
       />
     ),
-    hr: ({ node, ...props }) => (
-      <hr className="border-gray-600 my-3" {...props} />
-    ),
-    blockquote: ({ node, ...props }) => (
+    hr: (props) => <hr className="border-gray-600 my-3" {...props} />,
+    blockquote: (props) => (
       <blockquote
         className="border-l-2 border-blue-500 pl-3 italic my-2 text-gray-300"
         {...props}
       />
     ),
-    table: ({ node, ...props }) => (
+    table: (props) => (
       <div className="overflow-x-auto my-2">
         <table className="min-w-full text-xs border border-gray-700" {...props} />
       </div>
     ),
-    thead: ({ node, ...props }) => (
-      <thead className="bg-gray-700 text-white" {...props} />
+    thead: (props) => <thead className="bg-gray-700 text-white" {...props} />,
+    th: (props) => (
+      <th
+        className="px-2 py-1 border border-gray-600 text-left font-semibold"
+        {...props}
+      />
     ),
-    th: ({ node, ...props }) => (
-      <th className="px-2 py-1 border border-gray-600 text-left font-semibold" {...props} />
-    ),
-    td: ({ node, ...props }) => (
+    td: (props) => (
       <td className="px-2 py-1 border border-gray-600" {...props} />
     ),
   };
+
+  if (!isOpen) return null;
 
   return (
     <>
@@ -252,10 +283,10 @@ export default function AIchat() {
 
       <div
         className="fixed top-[18%] bottom-4 right-4 sm:top-[13%] sm:bottom-auto
-                   h-[77vh] max-h-[670px] w-[90vw] max-w-[350px]
-                   bg-black border border-black rounded-lg shadow-xl flex flex-col z-50"
+        h-[77vh] max-h-[670px] w-[90vw] max-w-[350px]
+        bg-black border border-black rounded-lg shadow-xl
+        flex flex-col z-50"
       >
-     
         <div className="flex justify-between items-center p-4 border-b border-gray-700 bg-gray-900 text-white rounded-t-lg">
           <h3 className="font-semibold text-lg">SirajVerse AI Assistant</h3>
           <div className="flex items-center gap-3">
@@ -268,47 +299,45 @@ export default function AIchat() {
                 <FaTrash className="h-4 w-4" />
               </button>
             )}
-
             <button
               onClick={() => {
                 setIsOpen(false);
-                toast.info("Chat window closed", {
-                  position: "top-right",
-                  autoClose: 2000,
-                });
+                toast.info("Chat window closed");
               }}
               className="text-white hover:text-gray-300"
+              title="Close chat"
             >
               <FaTimes className="h-5 w-5" />
             </button>
           </div>
         </div>
 
-      
         <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-gray-900 custom-scrollbar">
-          {messages.map((m, i) => (
+          {messages.map((message, index) => (
             <div
-              key={i}
-              className={`flex ${m.sender === "user" ? "justify-end" : "justify-start"}`}
+              key={index}
+              className={`flex ${
+                message.sender === "user" ? "justify-end" : "justify-start"
+              }`}
             >
               <div
                 className={`max-w-[85%] p-3 rounded-lg break-words ${
-                  m.sender === "user"
+                  message.sender === "user"
                     ? "bg-blue-600 text-white"
                     : "bg-gray-800 text-gray-100"
                 }`}
               >
-                {m.sender === "bot" ? (
+                {message.sender === "bot" ? (
                   <div className="markdown-body">
                     <ReactMarkdown
                       remarkPlugins={[remarkGfm]}
                       components={markdownComponents}
                     >
-                      {m.text}
+                      {message.text}
                     </ReactMarkdown>
                   </div>
                 ) : (
-                  <p className="text-sm whitespace-pre-wrap">{m.text}</p>
+                  <p className="text-sm whitespace-pre-wrap">{message.text}</p>
                 )}
               </div>
             </div>
@@ -317,7 +346,9 @@ export default function AIchat() {
           {loading && (
             <div className="flex justify-start">
               <div className="bg-gray-800 p-3 rounded-lg">
-                <p className="text-sm text-gray-400">Thinking...</p>
+                <p className="text-sm text-gray-400">
+                  SirajVerse AI is thinking...
+                </p>
               </div>
             </div>
           )}
@@ -325,23 +356,21 @@ export default function AIchat() {
           <div ref={messagesEndRef} />
         </div>
 
-      
         <div className="p-3 border-t border-gray-700 bg-gray-900 flex items-center gap-2">
           <input
             type="text"
             value={text}
             onChange={(e) => setText(e.target.value)}
-            onKeyPress={handleKeyPress}
+            onKeyDown={handleKeyPress}
             placeholder="Type your message..."
-            className="flex-1 px-3 py-2 border border-gray-700 bg-gray-800 text-white rounded-lg
-                      focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm"
+            className="flex-1 px-3 py-2 border border-gray-700 bg-gray-800 text-white rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm"
             disabled={loading}
           />
           <button
             onClick={handleSend}
             disabled={loading || !text.trim()}
             className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-500 disabled:cursor-not-allowed transition-colors"
-            title={!text.trim() ? "Enter a message to send" : "Send message"}
+            title="Send message"
           >
             <FaPaperPlane />
           </button>

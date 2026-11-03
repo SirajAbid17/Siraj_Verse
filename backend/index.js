@@ -1,4 +1,3 @@
-
 require("dotenv").config();
 
 const express = require("express");
@@ -8,11 +7,12 @@ const cors = require("cors");
 
 const dbconnect = require("./config/db");
 
-// Routes
+
 const connectionroute = require("./routes/Coneectionroutes");
 const userroute = require("./routes/userroutes");
 const authroute = require("./routes/authroutes");
 const postroutes = require("./routes/Postroutes");
+const airoutes = require("./routes/AIroutes");
 
 const app = express();
 
@@ -21,43 +21,31 @@ const PORT = process.env.PORT || 5000;
 const publicPath = path.join(__dirname, "public");
 const indexPath = path.join(publicPath, "index.html");
 
-// =====================================
-// CORS - ALLOW ALL ORIGINS
-// =====================================
 
 const corsOptions = {
   origin: (origin, callback) => {
-    // Allow requests from every origin, including requests without Origin
-    callback(null, origin || true);
+    
+    if (!origin) return callback(null, true);
+
+  
+    return callback(null, origin);
   },
-
   credentials: true,
-
-  methods: [
-    "GET",
-    "POST",
-    "PUT",
-    "PATCH",
-    "DELETE",
-    "OPTIONS",
-    "HEAD",
-  ],
-
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
   allowedHeaders: [
     "Content-Type",
     "Authorization",
     "X-Requested-With",
+    "Accept",
+    "Origin",
   ],
-
+  exposedHeaders: ["Set-Cookie"],
   optionsSuccessStatus: 204,
+  maxAge: 86400,
 };
 
 app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
-
-// =====================================
-// MIDDLEWARE
-// =====================================
 
 app.use(express.json({ limit: "10mb" }));
 
@@ -70,15 +58,7 @@ app.use(
 
 app.use(cookieParser());
 
-// =====================================
-// FRONTEND STATIC FILES
-// =====================================
-
 app.use(express.static(publicPath));
-
-// =====================================
-// DATABASE CONNECTION
-// =====================================
 
 let databaseConnection = null;
 
@@ -92,10 +72,6 @@ const connectDatabase = async () => {
 
   await databaseConnection;
 };
-
-// =====================================
-// HEALTH CHECK
-// =====================================
 
 app.get("/api/health", async (req, res) => {
   try {
@@ -115,10 +91,6 @@ app.get("/api/health", async (req, res) => {
   }
 });
 
-// =====================================
-// DATABASE MIDDLEWARE
-// =====================================
-
 app.use("/api", async (req, res, next) => {
   try {
     await connectDatabase();
@@ -133,18 +105,12 @@ app.use("/api", async (req, res, next) => {
   }
 });
 
-// =====================================
-// API ROUTES
-// =====================================
-
 app.use("/api/connections", connectionroute);
 app.use("/api", userroute);
 app.use("/api", authroute);
 app.use("/api", postroutes);
+app.use("/api", airoutes);
 
-// =====================================
-// API NOT FOUND
-// =====================================
 
 app.use("/api", (req, res) => {
   res.status(404).json({
@@ -153,10 +119,6 @@ app.use("/api", (req, res) => {
     path: req.originalUrl,
   });
 });
-
-// =====================================
-// REACT FRONTEND ROUTING
-// =====================================
 
 app.get(/.*/, (req, res, next) => {
   if (
@@ -178,10 +140,6 @@ app.get(/.*/, (req, res, next) => {
   });
 });
 
-// =====================================
-// GENERAL 404
-// =====================================
-
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -189,10 +147,6 @@ app.use((req, res) => {
     path: req.originalUrl,
   });
 });
-
-// =====================================
-// ERROR HANDLER
-// =====================================
 
 app.use((error, req, res, next) => {
   console.error("Server error:", error);
@@ -210,18 +164,11 @@ app.use((error, req, res, next) => {
   });
 });
 
-// =====================================
-// LOCAL SERVER
-// =====================================
 
 if (!process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
   });
 }
-
-// =====================================
-// VERCEL EXPORT
-// =====================================
 
 module.exports = app;
