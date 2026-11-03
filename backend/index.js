@@ -14,10 +14,10 @@ const userroute = require("./routes/userroutes");
 const authroute = require("./routes/authroutes");
 const postroutes = require("./routes/Postroutes");
 
-// App
 const app = express();
 
 const PORT = process.env.PORT || 5000;
+
 const publicPath = path.join(__dirname, "public");
 const indexPath = path.join(publicPath, "index.html");
 
@@ -27,9 +27,12 @@ const indexPath = path.join(publicPath, "index.html");
 
 const corsOptions = {
   origin: (origin, callback) => {
+    // Allow requests from every origin, including requests without Origin
     callback(null, origin || true);
   },
+
   credentials: true,
+
   methods: [
     "GET",
     "POST",
@@ -37,12 +40,16 @@ const corsOptions = {
     "PATCH",
     "DELETE",
     "OPTIONS",
+    "HEAD",
   ],
+
   allowedHeaders: [
     "Content-Type",
     "Authorization",
     "X-Requested-With",
   ],
+
+  optionsSuccessStatus: 204,
 };
 
 app.use(cors(corsOptions));
@@ -90,11 +97,22 @@ const connectDatabase = async () => {
 // HEALTH CHECK
 // =====================================
 
-app.get("/api/health", (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: "Server is running!",
-  });
+app.get("/api/health", async (req, res) => {
+  try {
+    await connectDatabase();
+
+    res.status(200).json({
+      success: true,
+      message: "Server and database connected successfully!",
+    });
+  } catch (error) {
+    console.error("Health check error:", error);
+
+    res.status(503).json({
+      success: false,
+      message: "Database connection failed",
+    });
+  }
 });
 
 // =====================================
@@ -106,7 +124,7 @@ app.use("/api", async (req, res, next) => {
     await connectDatabase();
     next();
   } catch (error) {
-    console.error("Database connection error:", error.message);
+    console.error("Database connection error:", error);
 
     res.status(503).json({
       success: false,
